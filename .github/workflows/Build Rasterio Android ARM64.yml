@@ -76,12 +76,18 @@ jobs:
           export PATH="$GITHUB_WORKSPACE:$PATH"
           chmod +x "$GDAL_CONFIG"
           "$GDAL_CONFIG" --version
-          # The source metadata is evaluated without build isolation so GDAL_CONFIG stays visible.
-          # Install its PEP 517 backend/build requirements in the host environment first.
-          python -m pip install --upgrade pip setuptools wheel "Cython>=3.0.2"
+          # Fetch source directly: pip metadata hooks need NumPy headers before Android build.
           mkdir -p sdists src
-          # Avoid an isolated PEP 517 metadata environment hiding the GDAL config.
-          python -m pip download --no-build-isolation --no-binary=:all: --no-deps --dest sdists "rasterio==$RASTERIO_VERSION"
+          python - <<'PY'
+          import json, os, urllib.request
+          version = os.environ["RASTERIO_VERSION"]
+          with urllib.request.urlopen(f"https://pypi.org/pypi/rasterio/{version}/json") as r:
+              metadata = json.load(r)
+          source = next(x["url"] for x in metadata["urls"] if x["packagetype"] == "sdist")
+          target = f"sdists/rasterio-{version}.tar.gz"
+          urllib.request.urlretrieve(source, target)
+          print("Downloaded source:", target, source)
+          PY
           TARBALL="$(find sdists -maxdepth 1 -name 'rasterio-*.tar.gz' -print -quit)"
           test -n "$TARBALL"
           mkdir -p src/rasterio-$RASTERIO_VERSION
