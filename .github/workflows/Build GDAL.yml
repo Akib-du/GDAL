@@ -133,6 +133,8 @@ jobs:
           test -d "$PREFIX/share/gdal"
           test -d "$PREFIX/share/proj"
           find "$PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -print | head -40
+          # The checked-in helper may not retain its executable bit in the checkout.
+          chmod +x "$GITHUB_WORKSPACE/gdal-config"
           "$GITHUB_WORKSPACE/gdal-config" --version
 
       - name: Package GDAL prefix
