@@ -76,6 +76,9 @@ jobs:
           export PATH="$GITHUB_WORKSPACE:$PATH"
           chmod +x "$GDAL_CONFIG"
           "$GDAL_CONFIG" --version
+          # The source metadata is evaluated without build isolation so GDAL_CONFIG stays visible.
+          # Install its PEP 517 backend/build requirements in the host environment first.
+          python -m pip install --upgrade pip setuptools wheel "Cython>=3.0.2"
           mkdir -p sdists src
           # Avoid an isolated PEP 517 metadata environment hiding the GDAL config.
           python -m pip download --no-build-isolation --no-binary=:all: --no-deps --dest sdists "rasterio==$RASTERIO_VERSION"
