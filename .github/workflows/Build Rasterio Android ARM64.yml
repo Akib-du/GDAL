@@ -63,14 +63,16 @@ jobs:
           FILE="wheelhouse/numpy-2.3.2-1-cp313-cp313-android_24_arm64_v8a.whl"
           curl --fail --location --retry 8 --retry-all-errors --retry-delay 5 "$URL" -o "$FILE"
           python -m zipfile -t "$FILE"
-          mkdir -p src/rasterio-1.4.3/.build-wheels
-          cp "$FILE" src/rasterio-1.4.3/.build-wheels/
           sha256sum "$FILE" | tee wheelhouse/NUMPY_SHA256SUM
 
       - name: Download Rasterio source distribution
         shell: bash
         run: |
           set -euo pipefail
+          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
+          export PATH="$GITHUB_WORKSPACE:$PATH"
+          chmod +x "$GDAL_CONFIG"
+          "$GDAL_CONFIG" --version
           mkdir -p sdists src
           python -m pip download --no-binary=:all: --no-deps --dest sdists "rasterio==$RASTERIO_VERSION"
           TARBALL="$(find sdists -maxdepth 1 -name 'rasterio-*.tar.gz' -print -quit)"
@@ -89,7 +91,7 @@ jobs:
           CIBW_PLATFORM: android
           CIBW_BUILD: cp313-android_arm64_v8a
           CIBW_ARCHS: arm64_v8a
-          CIBW_ENVIRONMENT: "GDAL_PREFIX=${{ env.GDAL_PREFIX }} GDAL_CONFIG=${{ github.workspace }}/gdal-config PKG_CONFIG_PATH=${{ env.GDAL_PREFIX }}/lib/pkgconfig"
+          CIBW_ENVIRONMENT: "GDAL_PREFIX=/home/runner/gdal/arm64-android-gis GDAL_CONFIG=/home/runner/work/GDAL/GDAL/gdal-config PKG_CONFIG_PATH=/home/runner/gdal/arm64-android-gis/lib/pkgconfig"
           CIBW_BEFORE_BUILD: "pip install --no-index --find-links={project}/.build-wheels numpy==2.3.2"
         run: |
           set -euo pipefail
