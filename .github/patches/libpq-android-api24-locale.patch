@@ -1,13 +1,13 @@
 diff --git a/src/port/chklocale.c b/src/port/chklocale.c
 --- a/src/port/chklocale.c
 +++ b/src/port/chklocale.c
-@@
+@@ -307,3 +307,5 @@
  #ifndef WIN32
 +#ifndef __BIONIC__
  	locale_t	loc;
 +#endif
  #endif
-@@
+@@ -322,11 +324,20 @@
  #ifndef WIN32
 +#ifdef __BIONIC__
 +	/*
