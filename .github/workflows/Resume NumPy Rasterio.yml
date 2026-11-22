@@ -72,6 +72,8 @@ jobs:
           CIBW_PLATFORM: android
           CIBW_BUILD: cp313-android_arm64_v8a
           CIBW_ARCHS: arm64_v8a
+          CIBW_BEFORE_BUILD: ""
+          CIBW_TEST_COMMAND: ""
         run: python -m cibuildwheel --output-dir wheelhouse "src/numpy-$NUMPY_VERSION"
 
       - name: Build Rasterio Android wheel
