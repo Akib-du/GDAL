@@ -107,7 +107,7 @@ jobs:
           CIBW_ENVIRONMENT: "GDAL_PREFIX=/home/runner/gdal/arm64-android-gis GDAL_CONFIG=/home/runner/work/GDAL/GDAL/gdal-config PKG_CONFIG_PATH=/home/runner/gdal/arm64-android-gis/lib/pkgconfig"
           CIBW_BEFORE_BUILD: >-
             pip install cython numpy==2.3.2 setuptools wheel &&
-            python -c "import pathlib, numpy as n; p = pathlib.Path(n.get_include()) / 'numpy' / 'npy_math.h'; assert p.is_file(), f'NumPy header not found: {p}'; s = p.read_text(); p.write_text(s if '#include <complex.h>' in s else '#include <complex.h>' + chr(10) + s); assert '#include <complex.h>' in p.read_text(); print('Patched NumPy complex header:', p)"
+            python -c "import pathlib, numpy as n; p = pathlib.Path(n.get_include()) / 'numpy' / 'npy_math.h'; assert p.is_file(), f'NumPy header not found: {p}'; s = p.read_text(); p.write_text(s if s.startswith('#include <complex.h>') else '#include <complex.h>' + chr(10) + s); assert '#include <complex.h>' in p.read_text(); print('Patched NumPy complex header:', p)"
         run: |
           set -euo pipefail
           export GDAL_PREFIX
