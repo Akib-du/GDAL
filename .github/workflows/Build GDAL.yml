@@ -135,6 +135,9 @@ jobs:
           find "$PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -print | head -40
           # The checked-in helper may not retain its executable bit in the checkout.
           chmod +x "$GITHUB_WORKSPACE/gdal-config"
+          # gdal-config resolves the cross-compiled vcpkg installation via this prefix.
+          export GDAL_PREFIX="$PREFIX"
+          test -f "$GDAL_PREFIX/include/gdal_version.h"
           "$GITHUB_WORKSPACE/gdal-config" --version
 
       - name: Package GDAL prefix
