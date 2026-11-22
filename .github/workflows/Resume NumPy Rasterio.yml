@@ -10,7 +10,7 @@ env:
   PY_TAG: cp313
   GDAL_TRIPLET: arm64-android-gis
   RASTERIO_VERSION: "1.4.3"
-  NUMPY_VERSION: "2.2.6"
+  NUMPY_VERSION: "1.26.2"
   GDAL_SOURCE_RUN_ID: "45036542523"
 
 jobs:
@@ -47,92 +47,10 @@ jobs:
           tar -xzf gdal-prefix.tgz -C "$HOME/gdal"
           test -f "$HOME/gdal/$GDAL_TRIPLET/include/gdal.h"
           test -f "$HOME/gdal/$GDAL_TRIPLET/lib/libgdal.so"
-          test -s "numpy-$NUMPY_VERSION.tar.gz"
           test -s "rasterio-$RASTERIO_VERSION.tar.gz"
-          tar -xzf "numpy-$NUMPY_VERSION.tar.gz" -C src
           tar -xzf "rasterio-$RASTERIO_VERSION.tar.gz" -C src
-          test -d "src/numpy-$NUMPY_VERSION"
           test -d "src/rasterio-$RASTERIO_VERSION"
           echo "Restored GDAL prefix and both source archives; no source downloads."
-
-      - name: Patch NumPy Android complex-math feature detection
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("src/numpy-2.2.6/numpy/_core/meson.build")
-          source = path.read_text()
-          old = """mandatory_complex_math_funcs = [
-            'csin', 'csinh', 'ccos', 'ccosh', 'ctan', 'ctanh', 'creal', 'cimag', 'conj'
-          ]
-          foreach func: mandatory_complex_math_funcs
-            if not cc.has_function(func, prefix: '#include <complex.h>', dependencies: m_dep)
-              error(f'Function `@func@` not found')
-            endif
-          endforeach
-          """
-          if old not in source:
-              raise SystemExit("Expected NumPy 2.2.6 mandatory complex-math check not found; refusing unsafe patch")
-          source = source.replace(
-              old,
-              "# Android/Bionic may omit optional C99 complex libm symbols.\n"
-              "# Keep NumPy's per-function HAVE_* probes below so its bundled\n"
-              "# npymath compatibility implementations are selected.\n"
-              "mandatory_complex_math_funcs = []\n",
-              1,
-          )
-          path.write_text(source)
-          check = path.read_text()
-
-          # Android API-level headers may not declare C complex accessors
-          # for every supported API. Clang provides __real__/__imag__ for C
-          # complex values; use these language operators instead of libc calls.
-          header = Path("src/numpy-2.2.6/numpy/_core/include/numpy/npy_math.h")
-          htext = header.read_text()
-          replacements = {
-              "return creal(z);": "return __real__ z;",
-              "return cimag(z);": "return __imag__ z;",
-              "return crealf(z);": "return __real__ z;",
-              "return cimagf(z);": "return __imag__ z;",
-              "return creall(z);": "return __real__ z;",
-              "return cimagl(z);": "return __imag__ z;",
-          }
-          for old_expr, new_expr in replacements.items():
-              count = htext.count(old_expr)
-              if count != 1:
-                  raise SystemExit(f"Expected exactly one {old_expr!r}, found {count}; refusing unsafe patch")
-              htext = htext.replace(old_expr, new_expr, 1)
-          header.write_text(htext)
-          verified_header = header.read_text()
-          for expression in ("__real__ z", "__imag__ z"):
-              assert verified_header.count(expression) == 3
-          assert not any(name in verified_header for name in ("return creal(z);", "return cimag(z);", "return crealf(z);", "return cimagf(z);", "return creall(z);", "return cimagl(z);"))
-          print("Verified: all six C complex accessors use Clang __real__/__imag__ operators; no Android libc declarations required.")
-          assert "mandatory_complex_math_funcs = []" in check
-          assert "c99_complex_funcs = [" in check
-
-          # Android arm64 follows the AArch64 ABI: 16-byte IEEE binary128
-          # long double, little-endian. Verify the ABI properties with
-          # compile-only checks; never try to execute a target binary.
-          anchor = "longdouble_format = meson.get_external_property('longdouble_format', 'UNKNOWN')\n"
-          if anchor not in check:
-              raise SystemExit("Expected NumPy long-double detection anchor not found; refusing unsafe patch")
-          abi_patch = """longdouble_format = meson.get_external_property('longdouble_format', 'UNKNOWN')
-          if longdouble_format == 'UNKNOWN' and host_machine.system() == 'android' and host_machine.cpu_family() == 'aarch64'
-            if host_machine.endian() == 'little' and cc.sizeof('long double') == 16 and cc.compiles('#include <float.h>\n_Static_assert(LDBL_MANT_DIG == 113, "not IEEE binary128");\nint main(void) { return 0; }')
-              longdouble_format = 'IEEE_QUAD_LE'
-            endif
-          endif
-          """
-          check = check.replace(anchor, abi_patch, 1)
-          path.write_text(check)
-          verified = path.read_text()
-          assert "longdouble_format = 'IEEE_QUAD_LE'" in verified
-          assert "LDBL_MANT_DIG == 113" in verified
-          print("Verified: Android arm64 long-double format uses compile-time ABI checks; no target execution.")
-          PY
 
       - name: Install cibuildwheel
         run: python -m pip install --upgrade "cibuildwheel==3.3.1"
@@ -157,26 +75,46 @@ jobs:
           echo "Verified cached Android CPython runtime: $RUNTIME"
           ls -lh "$RUNTIME"
 
-      - name: Build NumPy Android wheel
+      - name: Download and verify prebuilt Chaquopy NumPy wheels
         shell: bash
-        env:
-          CIBW_PLATFORM: android
-          CIBW_BUILD: cp313-android_arm64_v8a
-          CIBW_ARCHS: arm64_v8a
-          # Android ARM64 build has no packaged BLAS yet. Use NumPy's supported
-          # internal fallback and LP64 ABI; avoid probing unavailable ILP64 BLAS.
-          CIBW_CONFIG_SETTINGS: "setup-args=-Duse-ilp64=false setup-args=-Dallow-noblas=true build-dir=build"
-          # Android's cross toolchain adds --no-undefined to LDFLAGS. NumPy
-          # extension modules use CPython's stable process-wide API symbols;
-          # explicitly link the Android CPython shared library to satisfy lld.
-          CIBW_ENVIRONMENT: 'LDFLAGS="$LDFLAGS -lpython3.13"'
-          CIBW_BEFORE_BUILD: >-
-            pip install 'Cython>=3.0.6' 'meson-python>=0.15.0' &&
-            python -c "import pathlib,sysconfig; p=pathlib.Path(sysconfig.get_config_var('LIBDIR')); libs=list(p.glob('libpython3.13.so*')); print('Android CPython LIBDIR:',p,'shared libraries:',libs); assert libs, 'Android libpython3.13.so is missing'"
-          CIBW_TEST_COMMAND: " "
         run: |
           set -euo pipefail
-          python -m cibuildwheel --output-dir wheelhouse "src/numpy-$NUMPY_VERSION"
+          mkdir -p wheelhouse .build-wheels
+          BASE="https://chaquo.com/pypi-13.1"
+          files=(
+            "numpy/numpy-1.26.2-0-cp313-cp313-android_24_arm64_v8a.whl"
+            "chaquopy-openblas/chaquopy_openblas-0.2.20-5-py3-none-android_21_arm64_v8a.whl"
+            "chaquopy-libcxx/chaquopy_libcxx-180000-0-py3-none-android_24_arm64_v8a.whl"
+            "chaquopy-libgfortran/chaquopy_libgfortran-4.9-0-py3-none-android_21_arm64_v8a.whl"
+          )
+          for file in "${files[@]}"; do
+            name="${file##*/}"
+            curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
+              "$BASE/$file" -o "wheelhouse/$name"
+            python -m zipfile -t "wheelhouse/$name"
+            cp "wheelhouse/$name" .build-wheels/
+          done
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          expected = {
+              "numpy-1.26.2-0-cp313-cp313-android_24_arm64_v8a.whl",
+              "chaquopy_openblas-0.2.20-5-py3-none-android_21_arm64_v8a.whl",
+              "chaquopy_libcxx-180000-0-py3-none-android_24_arm64_v8a.whl",
+              "chaquopy_libgfortran-4.9-0-py3-none-android_21_arm64_v8a.whl",
+          }
+          found = {p.name for p in Path("wheelhouse").glob("*.whl")}
+          if found != expected:
+              raise SystemExit(f"Unexpected prebuilt wheel set: {found}")
+          numpy = next(Path("wheelhouse").glob("numpy-*.whl"))
+          with ZipFile(numpy) as z:
+              metadata_name = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+              metadata = z.read(metadata_name).decode()
+          print("Prebuilt NumPy metadata:")
+          print("\\n".join(line for line in metadata.splitlines() if line.startswith(("Name:", "Version:", "Requires-Dist:"))))
+          assert "Name: numpy" in metadata and "Version: 1.26.2" in metadata
+          PY
+          echo "Prebuilt CPython 3.13 Android ARM64 NumPy and runtime dependency wheels validated."
 
       - name: Build Rasterio Android wheel
         shell: bash
@@ -188,7 +126,7 @@ jobs:
           set -euo pipefail
           export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
           export CIBW_ENVIRONMENT="GDAL_PREFIX=$GDAL_PREFIX GDAL_CONFIG=$GITHUB_WORKSPACE/gdal-config PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig"
-          export CIBW_BEFORE_BUILD="pip install cython numpy==$NUMPY_VERSION setuptools wheel"
+          export CIBW_BEFORE_BUILD="pip install --no-index --find-links={project}/.build-wheels cython numpy==$NUMPY_VERSION setuptools wheel"
           python -m cibuildwheel --output-dir wheelhouse "src/rasterio-$RASTERIO_VERSION"
 
       - name: Collect GDAL runtime libraries and data
