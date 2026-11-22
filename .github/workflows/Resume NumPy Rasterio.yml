@@ -1,0 +1,106 @@
+name: Resume NumPy + Rasterio Android wheels (reuse GDAL)
+
+on:
+  workflow_dispatch:
+    inputs:
+      gdal_run_id:
+        description: "Successful GDAL build run ID containing the gdal-prefix artifact"
+        required: true
+        default: "45036542523"
+        type: string
+
+env:
+  PY_TAG: cp313
+  GDAL_TRIPLET: arm64-android-gis
+  RASTERIO_VERSION: "1.4.3"
+  NUMPY_VERSION: "2.2.6"
+
+jobs:
+  wheels:
+    name: NumPy + Rasterio Android wheels (reuse GDAL)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download successful GDAL prefix from previous run
+        uses: actions/download-artifact@v4
+        with:
+          name: gdal-prefix
+          run-id: ${{ inputs.gdal_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Unpack and validate GDAL prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/gdal"
+          tar -xzf gdal-prefix.tgz -C "$HOME/gdal"
+          echo "GDAL_PREFIX=$HOME/gdal/$GDAL_TRIPLET" >> "$GITHUB_ENV"
+          test -f "$HOME/gdal/$GDAL_TRIPLET/include/gdal.h"
+          test -f "$HOME/gdal/$GDAL_TRIPLET/lib/libgdal.so"
+          chmod +x "$GITHUB_WORKSPACE/gdal-config"
+
+      - name: Install cibuildwheel
+        run: python -m pip install --upgrade "cibuildwheel==3.3.1"
+
+      - name: Download NumPy and Rasterio source distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
+          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
+          export GDAL_VERSION="$("$GDAL_CONFIG" --version)"
+          export PATH="$GITHUB_WORKSPACE:$PATH"
+          test -x "$GDAL_CONFIG"
+          test -f "$GDAL_PREFIX/include/gdal.h"
+          echo "Using cached GDAL $GDAL_VERSION from run ${{ inputs.gdal_run_id }}"
+
+          mkdir -p sdists src
+          python -m pip download --no-binary :all: --no-deps -d sdists \
+            "numpy==$NUMPY_VERSION" "rasterio==$RASTERIO_VERSION"
+          for f in sdists/*.tar.gz; do
+            d="src/$(basename "$f" .tar.gz)"
+            mkdir -p "$d"
+            tar -xzf "$f" -C "$d" --strip-components=1
+          done
+          test -d "src/numpy-$NUMPY_VERSION"
+          test -d "src/rasterio-$RASTERIO_VERSION"
+
+      - name: Build NumPy Android wheel
+        env:
+          CIBW_PLATFORM: android
+          CIBW_BUILD: cp313-android_arm64_v8a
+          CIBW_ARCHS: arm64_v8a
+        run: python -m cibuildwheel --output-dir wheelhouse "src/numpy-$NUMPY_VERSION"
+
+      - name: Build Rasterio Android wheel
+        shell: bash
+        env:
+          CIBW_PLATFORM: android
+          CIBW_BUILD: cp313-android_arm64_v8a
+          CIBW_ARCHS: arm64_v8a
+        run: |
+          set -euo pipefail
+          export CIBW_ENVIRONMENT="GDAL_PREFIX=$GDAL_PREFIX GDAL_CONFIG=$GITHUB_WORKSPACE/gdal-config PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig"
+          export CIBW_BEFORE_BUILD="pip install cython numpy==$NUMPY_VERSION setuptools wheel"
+          python -m cibuildwheel --output-dir wheelhouse "src/rasterio-$RASTERIO_VERSION"
+
+      - name: Collect GDAL runtime libraries and data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p wheelhouse/native wheelhouse/data
+          find "$GDAL_PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -exec cp -av {} wheelhouse/native/ \\;
+          test -n "$(find wheelhouse/native -type f -name '*.so*' -print -quit)"
+          cp -a "$GDAL_PREFIX/share/gdal" wheelhouse/data/gdal
+          cp -a "$GDAL_PREFIX/share/proj" wheelhouse/data/proj
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-arm64-gis-wheels
+          path: wheelhouse
+          if-no-files-found: error
