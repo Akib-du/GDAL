@@ -34,7 +34,7 @@ jobs:
           command -v automake
           command -v libtoolize
 
-      - name: Set up vcpkg and Android-safe OpenSSL overlay
+      - name: Set up vcpkg and Android-safe dependency overlays
         shell: bash
         run: |
           set -euo pipefail
@@ -59,6 +59,29 @@ jobs:
           print("Applied Android-only OpenSSL __int128 optimization workaround.")
           PY
           sed -n '1,100p' "$RUNNER_TEMP/overlay-ports/openssl/portfile.cmake"
+
+          # Keep GDAL's PostgreSQL driver enabled. PostgreSQL 18 calls
+          # nl_langinfo_l(), which Bionic only exposes from API 26, while this
+          # project intentionally targets API 24. Patch only the Android
+          # locale-detection branch; Android's supported locale is UTF-8.
+          cp -a "$RUNNER_TEMP/vcpkg/ports/libpq" "$RUNNER_TEMP/overlay-ports/libpq"
+          cp "$GITHUB_WORKSPACE/.github/patches/libpq-android-api24-locale.patch" \
+            "$RUNNER_TEMP/overlay-ports/libpq/android-api24-locale.patch"
+          OVERLAY_PORTS="$RUNNER_TEMP/overlay-ports" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          p = Path(os.environ["OVERLAY_PORTS"]) / "libpq" / "portfile.cmake"
+          s = p.read_text()
+          needle = "        windows/postgresql-14.0-use-mingw-setjmp-on-ucrt.patch\\n"
+          if s.count(needle) != 1:
+              raise SystemExit("Unexpected libpq portfile patch list; refusing an unverified edit.")
+          s = s.replace(needle, needle + "        android-api24-locale.patch\\n", 1)
+          p.write_text(s)
+          if "android-api24-locale.patch" not in p.read_text():
+              raise SystemExit("Android libpq patch was not registered.")
+          print("Registered Android API 24 locale compatibility patch for libpq.")
+          PY
+          grep -n -A12 -B3 'PATCHES' "$RUNNER_TEMP/overlay-ports/libpq/portfile.cmake"
 
       - name: Create Android ARM64 triplet
         shell: bash
