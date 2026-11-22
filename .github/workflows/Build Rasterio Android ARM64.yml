@@ -104,7 +104,7 @@ jobs:
           CIBW_PLATFORM: android
           CIBW_BUILD: cp313-android_arm64_v8a
           CIBW_ARCHS: arm64_v8a
-          CIBW_ENVIRONMENT: "GDAL_PREFIX=/home/runner/gdal/arm64-android-gis GDAL_CONFIG=/home/runner/work/GDAL/GDAL/gdal-config PKG_CONFIG_PATH=/home/runner/gdal/arm64-android-gis/lib/pkgconfig"
+          CIBW_ENVIRONMENT: "ANDROID_API_LEVEL=24 GDAL_PREFIX=/home/runner/gdal/arm64-android-gis GDAL_CONFIG=/home/runner/work/GDAL/GDAL/gdal-config PKG_CONFIG_PATH=/home/runner/gdal/arm64-android-gis/lib/pkgconfig"
           CIBW_BEFORE_BUILD: >-
             pip install cython numpy==2.3.2 setuptools wheel &&
             python -c "import pathlib, numpy as n; p = pathlib.Path(n.get_include()) / 'numpy' / 'npy_math.h'; s = p.read_text(); pre = '#include <complex.h>' + chr(10) + chr(10).join(['#ifndef creal', '#define creal(z) __real__ (z)', '#endif', '#ifndef cimag', '#define cimag(z) __imag__ (z)', '#endif', '#ifndef crealf', '#define crealf(z) __real__ (z)', '#endif', '#ifndef cimagf', '#define cimagf(z) __imag__ (z)', '#endif', '#ifndef creall', '#define creall(z) __real__ (z)', '#endif', '#ifndef cimagl', '#define cimagl(z) __imag__ (z)', '#endif']) + chr(10) + chr(10); s = s if pre in s else pre + s; p.write_text(s); assert p.read_text().startswith(pre); print('Patched NumPy complex accessors at header start:', p); print(chr(10).join(p.read_text().splitlines()[:18]))"
