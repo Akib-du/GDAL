@@ -1,0 +1,28 @@
+diff --git a/src/port/chklocale.c b/src/port/chklocale.c
+--- a/src/port/chklocale.c
++++ b/src/port/chklocale.c
+@@
+ #ifndef WIN32
++#ifndef __BIONIC__
+ 	locale_t	loc;
++#endif
+ #endif
+@@
+ #ifndef WIN32
++#ifdef __BIONIC__
++	/*
++	 * Android Bionic supports only the C/POSIX UTF-8 locale.  The
++	 * locale-specific nl_langinfo_l() API is not exposed at our minimum
++	 * Android API level (24), so treat non-C locale names as UTF-8.
++	 */
++	return PG_UTF8;
++#else
+ 	loc = newlocale(LC_CTYPE_MASK, ctype, (locale_t) 0);
+ 	if (loc == (locale_t) 0)
+ 		return -1;				/* bogus ctype passed in? */
+@@
+ 	freelocale(loc);
++#endif
+ #else
+ 	sys = win32_get_codeset(ctype);
+ #endif
