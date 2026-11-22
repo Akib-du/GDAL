@@ -17,7 +17,7 @@ for header in headers:
         continue
     text = header.read_text(errors="replace")
     for name in ("GDAL_VERSION_MAJOR", "GDAL_VERSION_MINOR", "GDAL_VERSION_REV"):
-        match = re.search(rf"^#\\s*define\\s+{name}\\s+(\\d+)", text, re.M)
+        match = re.search(rf"^#\s*define\s+{name}\s+(\d+)", text, re.M)
         if match:
             macros[name] = int(match.group(1))
     if len(macros) == 3:
@@ -25,7 +25,7 @@ for header in headers:
             "GDAL_VERSION_MAJOR", "GDAL_VERSION_MINOR", "GDAL_VERSION_REV"
         )))
         raise SystemExit(0)
-    match = re.search(r"^#\\s*define\\s+GDAL_VERSION_NUM\\s+(\\d+)", text, re.M)
+    match = re.search(r"^#\s*define\s+GDAL_VERSION_NUM\s+(\d+)", text, re.M)
     if match:
         number = int(match.group(1))
         print(f"{number // 1000000}.{(number // 10000) % 100}.{(number // 100) % 100}")
