@@ -22,6 +22,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install host-side Autotools dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf autoconf-archive automake libtool
+          command -v autoconf
+          command -v autoreconf
+          command -v automake
+          command -v libtoolize
+
       - name: Set up vcpkg and Android-safe OpenSSL overlay
         shell: bash
         run: |
