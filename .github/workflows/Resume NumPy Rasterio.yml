@@ -146,7 +146,13 @@ jobs:
           # Android ARM64 build has no packaged BLAS yet. Use NumPy's supported
           # internal fallback and LP64 ABI; avoid probing unavailable ILP64 BLAS.
           CIBW_CONFIG_SETTINGS: "setup-args=-Duse-ilp64=false setup-args=-Dallow-noblas=true build-dir=build"
-          CIBW_BEFORE_BUILD: "pip install 'Cython>=3.0.6' 'meson-python>=0.15.0'"
+          # Android's cross toolchain adds --no-undefined to LDFLAGS. NumPy
+          # extension modules use CPython's stable process-wide API symbols;
+          # explicitly link the Android CPython shared library to satisfy lld.
+          CIBW_ENVIRONMENT: 'LDFLAGS="$LDFLAGS -lpython3.13"'
+          CIBW_BEFORE_BUILD: >-
+            pip install 'Cython>=3.0.6' 'meson-python>=0.15.0' &&
+            python -c "import pathlib,sysconfig; p=pathlib.Path(sysconfig.get_config_var('LIBDIR')); libs=list(p.glob('libpython3.13.so*')); print('Android CPython LIBDIR:',p,'shared libraries:',libs); assert libs, 'Android libpython3.13.so is missing'"
           CIBW_TEST_COMMAND: " "
         run: |
           set -euo pipefail
