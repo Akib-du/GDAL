@@ -1,9 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # Minimal gdal-config shim for cross-compiling rasterio against a vcpkg GDAL.
-# vcpkg's gdal port does not ship gdal-config, but rasterio's setup.py needs it.
+# Resolve the installed version from whichever public header this GDAL build ships.
 P="${GDAL_PREFIX:?set GDAL_PREFIX to the vcpkg installed/<triplet> dir}"
-VER=$(grep -E '#define GDAL_RELEASE_NAME' "$P/include/gdal_version.h" | sed -E 's/.*"([^"]+)".*/\1/')
+VER="$(python3 - "$P/include" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+include = Path(sys.argv[1])
+version_file = include / "gdal_version.h"
+headers = [version_file, include / "gdal.h"]
+macros = {}
+for header in headers:
+    if not header.is_file():
+        continue
+    text = header.read_text(errors="replace")
+    for name in ("GDAL_VERSION_MAJOR", "GDAL_VERSION_MINOR", "GDAL_VERSION_REV"):
+        match = re.search(rf"^#\\s*define\\s+{name}\\s+(\\d+)", text, re.M)
+        if match:
+            macros[name] = int(match.group(1))
+    if len(macros) == 3:
+        print(".".join(str(macros[k]) for k in (
+            "GDAL_VERSION_MAJOR", "GDAL_VERSION_MINOR", "GDAL_VERSION_REV"
+        )))
+        raise SystemExit(0)
+    match = re.search(r"^#\\s*define\\s+GDAL_VERSION_NUM\\s+(\\d+)", text, re.M)
+    if match:
+        number = int(match.group(1))
+        print(f"{number // 1000000}.{(number // 10000) % 100}.{(number // 100) % 100}")
+        raise SystemExit(0)
+raise SystemExit("Could not determine GDAL version from installed gdal_version.h or gdal.h")
+PY
+)"
+test -n "$VER"
 for a in "$@"; do
   case "$a" in
     --version)  echo "$VER" ;;
