@@ -132,6 +132,8 @@ jobs:
           test -f "$PREFIX/lib/libgdal.so"
           test -d "$PREFIX/share/gdal"
           test -d "$PREFIX/share/proj"
+          echo "Installed GDAL headers:"
+          find "$PREFIX/include" -maxdepth 2 -type f -name "gdal_version.h" -o -name "gdal.h"
           find "$PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -print | head -40
           # The version header location varies between GDAL/vcpkg builds.
           # gdal-config detects the version from gdal_version.h or gdal.h.
