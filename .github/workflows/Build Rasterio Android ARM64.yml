@@ -1,0 +1,153 @@
+name: Build Rasterio Android ARM64 wheel
+
+permissions:
+  contents: write
+  actions: read
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/Build Rasterio Android ARM64.yml"
+
+env:
+  PY_TAG: cp313
+  GDAL_TRIPLET: arm64-android-gis
+  RASTERIO_VERSION: "1.4.3"
+  NUMPY_VERSION: "2.3.2"
+  GDAL_SOURCE_RUN_ID: "45036542523"
+
+jobs:
+  rasterio:
+    name: Build Rasterio CPython 3.13 Android ARM64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download previously built GDAL prefix (no GDAL rebuild)
+        uses: actions/download-artifact@v4
+        with:
+          name: gdal-prefix
+          path: gdal-artifact
+          run-id: ${{ env.GDAL_SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore GDAL prefix and validate gdal-config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s gdal-artifact/gdal-prefix.tgz
+          mkdir -p "$HOME/gdal"
+          tar -xzf gdal-artifact/gdal-prefix.tgz -C "$HOME/gdal"
+          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
+          test -d "$GDAL_PREFIX/include"
+          test -d "$GDAL_PREFIX/lib"
+          chmod +x "$GITHUB_WORKSPACE/gdal-config"
+          export GDAL_PREFIX
+          "$GITHUB_WORKSPACE/gdal-config" --version
+          "$GITHUB_WORKSPACE/gdal-config" --cflags
+          "$GITHUB_WORKSPACE/gdal-config" --libs
+          echo "GDAL_PREFIX=$GDAL_PREFIX" >> "$GITHUB_ENV"
+
+      - name: Download and verify saved Android NumPy wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p wheelhouse
+          URL="https://github.com/Akib-du/GDAL/releases/download/android-numpy-2.3.2-cp313/numpy-2.3.2-1-cp313-cp313-android_24_arm64_v8a.whl"
+          FILE="wheelhouse/numpy-2.3.2-1-cp313-cp313-android_24_arm64_v8a.whl"
+          curl --fail --location --retry 8 --retry-all-errors --retry-delay 5 "$URL" -o "$FILE"
+          python -m zipfile -t "$FILE"
+          mkdir -p src/rasterio-1.4.3/.build-wheels
+          cp "$FILE" src/rasterio-1.4.3/.build-wheels/
+          sha256sum "$FILE" | tee wheelhouse/NUMPY_SHA256SUM
+
+      - name: Download Rasterio source distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sdists src
+          python -m pip download --no-binary=:all: --no-deps --dest sdists "rasterio==$RASTERIO_VERSION"
+          TARBALL="$(find sdists -maxdepth 1 -name 'rasterio-*.tar.gz' -print -quit)"
+          test -n "$TARBALL"
+          mkdir -p src/rasterio-$RASTERIO_VERSION
+          tar -xzf "$TARBALL" -C src/rasterio-$RASTERIO_VERSION --strip-components=1
+          mkdir -p src/rasterio-$RASTERIO_VERSION/.build-wheels
+          cp wheelhouse/numpy-*.whl src/rasterio-$RASTERIO_VERSION/.build-wheels/
+
+      - name: Install cibuildwheel
+        run: python -m pip install "cibuildwheel==3.3.1"
+
+      - name: Build Rasterio Android ARM64 wheel
+        shell: bash
+        env:
+          CIBW_PLATFORM: android
+          CIBW_BUILD: cp313-android_arm64_v8a
+          CIBW_ARCHS: arm64_v8a
+          CIBW_ENVIRONMENT: "GDAL_PREFIX=${{ env.GDAL_PREFIX }} GDAL_CONFIG=${{ github.workspace }}/gdal-config PKG_CONFIG_PATH=${{ env.GDAL_PREFIX }}/lib/pkgconfig"
+          CIBW_BEFORE_BUILD: "pip install --no-index --find-links={project}/.build-wheels numpy==2.3.2"
+        run: |
+          set -euo pipefail
+          export GDAL_PREFIX
+          chmod +x "$GITHUB_WORKSPACE/gdal-config"
+          "$GITHUB_WORKSPACE/gdal-config" --version
+          python -m cibuildwheel --output-dir wheelhouse "src/rasterio-$RASTERIO_VERSION"
+
+      - name: Validate Rasterio wheel and Android native binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import re, subprocess, tempfile
+          wheels = list(Path("wheelhouse").glob("rasterio-*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"Expected exactly one Rasterio wheel, found {wheels}")
+          wheel = wheels[0]
+          with ZipFile(wheel) as z:
+              bad = z.testzip()
+              if bad:
+                  raise SystemExit(f"Corrupt ZIP member: {bad}")
+              so_files = [n for n in z.namelist() if n.endswith(".so")]
+              if not so_files:
+                  raise SystemExit("Rasterio wheel contains no native .so files")
+              with tempfile.TemporaryDirectory() as td:
+                  for i, name in enumerate(so_files):
+                      p = Path(td) / f"{i}.so"
+                      p.write_bytes(z.read(name))
+                      hdr = subprocess.check_output(["readelf", "-h", str(p)], text=True)
+                      if "AArch64" not in hdr:
+                          raise SystemExit(f"Not AArch64: {name}")
+                      ph = subprocess.check_output(["readelf", "-lW", str(p)], text=True)
+                      aligns = [int(x, 16) for x in re.findall(r"LOAD\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(0x[0-9a-fA-F]+)", ph)]
+                      if not aligns or min(aligns) < 0x4000:
+                          raise SystemExit(f"16 KB LOAD alignment check failed: {name}: {aligns}")
+                      print(f"ELF OK: {name}; LOAD alignments={aligns}")
+          print("Validated:", wheel, wheel.stat().st_size, "bytes")
+          PY
+          (cd wheelhouse && sha256sum rasterio-*.whl > RASTERIO_SHA256SUMS)
+
+      - name: Upload Rasterio wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rasterio-1.4.3-android-arm64-cp313
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish Rasterio wheel as persistent GitHub Release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-rasterio-1.4.3-cp313
+          name: Rasterio 1.4.3 Android ARM64 CPython 3.13
+          draft: false
+          prerelease: true
+          make_latest: false
+          files: wheelhouse/rasterio-*.whl
+          fail_on_unmatched_files: true
