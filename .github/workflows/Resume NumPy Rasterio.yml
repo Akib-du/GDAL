@@ -14,90 +14,8 @@ env:
   GDAL_SOURCE_RUN_ID: "45036542523"
 
 jobs:
-  gdal:
-    name: Restore verified GDAL prefix (no compilation)
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Download successful GDAL prefix from Run 15
-        uses: actions/download-artifact@v4
-        with:
-          name: gdal-prefix
-          run-id: ${{ env.GDAL_SOURCE_RUN_ID }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-
-      - name: Validate and republish cached GDAL prefix
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -s gdal-prefix.tgz
-          tar -tzf gdal-prefix.tgz > gdal-prefix-files.txt
-          grep -Fqx "$GDAL_TRIPLET/include/gdal.h" gdal-prefix-files.txt
-          grep -Fqx "$GDAL_TRIPLET/lib/libgdal.so" gdal-prefix-files.txt
-          echo "GDAL prefix restored from Run $GDAL_SOURCE_RUN_ID; no GDAL build."
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gdal-prefix
-          path: gdal-prefix.tgz
-          if-no-files-found: error
-          retention-days: 14
-
-  sources:
-    name: Download and preserve NumPy + Rasterio source archives
-    needs: gdal
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-      - uses: actions/download-artifact@v4
-        with:
-          name: gdal-prefix
-
-      - name: Unpack GDAL and configure source metadata environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/gdal"
-          tar -xzf gdal-prefix.tgz -C "$HOME/gdal"
-          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
-          chmod +x "$GITHUB_WORKSPACE/gdal-config"
-          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
-          export PATH="$GITHUB_WORKSPACE:$PATH"
-          test -f "$GDAL_PREFIX/include/gdal.h"
-          test -f "$GDAL_PREFIX/lib/libgdal.so"
-          test -d "$GDAL_PREFIX/share/gdal"
-          echo "GDAL $("$GDAL_CONFIG" --version) is ready for Rasterio metadata."
-          echo "GDAL_PREFIX=$GDAL_PREFIX" >> "$GITHUB_ENV"
-
-      - name: Download and verify source distributions
-        shell: bash
-        run: |
-          set -euo pipefail
-          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
-          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
-          export GDAL_VERSION="$("$GDAL_CONFIG" --version)"
-          export PATH="$GITHUB_WORKSPACE:$PATH"
-          mkdir -p sdists
-          python -m pip download --no-binary :all: --no-deps -d sdists \
-            "numpy==$NUMPY_VERSION" "rasterio==$RASTERIO_VERSION"
-          test -s "sdists/numpy-$NUMPY_VERSION.tar.gz"
-          test -s "sdists/rasterio-$RASTERIO_VERSION.tar.gz"
-          tar -tzf "sdists/numpy-$NUMPY_VERSION.tar.gz" >/dev/null
-          tar -tzf "sdists/rasterio-$RASTERIO_VERSION.tar.gz" >/dev/null
-          sha256sum sdists/*.tar.gz
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: python-sdists
-          path: sdists/*.tar.gz
-          if-no-files-found: error
-          retention-days: 14
-
   wheels:
-    name: Build NumPy + Rasterio Android wheels (reuse saved inputs)
-    needs: [gdal, sources]
+    name: Build NumPy + Rasterio Android wheels (resume after source download)
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -106,12 +24,20 @@ jobs:
         with:
           python-version: "3.13"
 
+      # Reuse the verified artifacts created in Run #22; do not rebuild GDAL
+      # and do not download NumPy/Rasterio source distributions again.
       - uses: actions/download-artifact@v4
         with:
           name: gdal-prefix
+          run-id: 45042047911
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
       - uses: actions/download-artifact@v4
         with:
           name: python-sdists
+          run-id: 45042047911
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
 
       - name: Restore and validate cached inputs
         shell: bash
