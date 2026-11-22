@@ -107,7 +107,7 @@ jobs:
           CIBW_ENVIRONMENT: "GDAL_PREFIX=/home/runner/gdal/arm64-android-gis GDAL_CONFIG=/home/runner/work/GDAL/GDAL/gdal-config PKG_CONFIG_PATH=/home/runner/gdal/arm64-android-gis/lib/pkgconfig"
           CIBW_BEFORE_BUILD: >-
             pip install cython numpy==2.3.2 setuptools wheel &&
-            python -c "import pathlib, numpy as n; p = pathlib.Path(n.get_include()) / 'numpy' / 'npy_math.h'; assert p.is_file(), f'NumPy header not found: {p}'; s = p.read_text(); p.write_text(s if s.startswith('#include <complex.h>') else '#include <complex.h>' + chr(10) + s); assert '#include <complex.h>' in p.read_text(); print('Patched NumPy complex header:', p)"
+            python -c "import pathlib, numpy as n; p = pathlib.Path(n.get_include()) / 'numpy' / 'npy_math.h'; s = p.read_text(); inc = '#include <complex.h>' + chr(10); defs = chr(10).join(['#ifndef creal', '#define creal(z) __real__ (z)', '#endif', '#ifndef cimag', '#define cimag(z) __imag__ (z)', '#endif', '#ifndef crealf', '#define crealf(z) __real__ (z)', '#endif', '#ifndef cimagf', '#define cimagf(z) __imag__ (z)', '#endif', '#ifndef creall', '#define creall(z) __real__ (z)', '#endif', '#ifndef cimagl', '#define cimagl(z) __imag__ (z)', '#endif']) + chr(10); s = s.replace(inc, inc + defs, 1) if defs not in s else s; p.write_text(s); assert all(x in p.read_text() for x in ['#define creal(z)', '#define cimag(z)', '#define crealf(z)', '#define cimagf(z)', '#define creall(z)', '#define cimagl(z)']); print('Patched NumPy complex accessors:', p)"
         run: |
           set -euo pipefail
           export GDAL_PREFIX
