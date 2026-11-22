@@ -40,11 +40,10 @@ jobs:
           from pathlib import Path
           p = Path(os.environ["OVERLAY_PORTS"]) / "openssl" / "portfile.cmake"
           s = p.read_text()
-          old = 'if(VCPKG_DETECTED_CMAKE_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$"'
-          new = 'if(NOT VCPKG_TARGET_IS_ANDROID AND VCPKG_DETECTED_CMAKE_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$"'
-          if old not in s:
-              raise SystemExit("Expected OpenSSL optimization condition was not found; refusing to patch an unknown portfile.")
-          p.write_text(s.replace(old, new, 1))
+          target = "vcpkg_list(APPEND CONFIGURE_OPTIONS enable-ec_nistp_64_gcc_128)"
+          if target not in s:
+              raise SystemExit("Expected OpenSSL __int128 optimization option was not found; refusing to patch an unknown portfile.")
+          p.write_text(s.replace(target, "# Disabled for Android NDK: avoid unsupported OpenSSL __int128 EC optimization.", 1))
           print("Applied Android-only OpenSSL __int128 optimization workaround.")
           PY
           grep -n -A2 'VCPKG_TARGET_IS_ANDROID' "$RUNNER_TEMP/overlay-ports/openssl/portfile.cmake"
