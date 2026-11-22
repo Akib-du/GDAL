@@ -27,7 +27,7 @@ jobs:
             --connect-timeout 30 --max-time 900 "$URL" -o "$FILE"
           test -s "$FILE"
           ls -lh "$FILE"
-          sha256sum "$FILE" | tee wheelhouse/SHA256SUMS
+          (cd wheelhouse && sha256sum "$(basename "$FILE")" > SHA256SUMS)
 
       - name: Validate wheel metadata, archive and Android ELF binaries
         shell: bash
