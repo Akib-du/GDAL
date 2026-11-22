@@ -79,7 +79,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p wheelhouse .build-wheels
+          mkdir -p wheelhouse "src/rasterio-$RASTERIO_VERSION/.build-wheels"
           BASE="https://chaquo.com/pypi-13.1"
           files=(
             "numpy/numpy-1.26.2-0-cp313-cp313-android_24_arm64_v8a.whl"
@@ -92,7 +92,7 @@ jobs:
             curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
               "$BASE/$file" -o "wheelhouse/$name"
             python -m zipfile -t "wheelhouse/$name"
-            cp "wheelhouse/$name" .build-wheels/
+            cp "wheelhouse/$name" "src/rasterio-$RASTERIO_VERSION/.build-wheels/"
           done
           python - <<'PY'
           from pathlib import Path
@@ -111,7 +111,7 @@ jobs:
               metadata_name = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
               metadata = z.read(metadata_name).decode()
           print("Prebuilt NumPy metadata:")
-          print("\\n".join(line for line in metadata.splitlines() if line.startswith(("Name:", "Version:", "Requires-Dist:"))))
+          print("\n".join(line for line in metadata.splitlines() if line.startswith(("Name:", "Version:", "Requires-Dist:"))))
           assert "Name: numpy" in metadata and "Version: 1.26.2" in metadata
           PY
           echo "Prebuilt CPython 3.13 Android ARM64 NumPy and runtime dependency wheels validated."
