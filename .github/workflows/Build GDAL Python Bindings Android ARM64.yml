@@ -1,0 +1,177 @@
+name: Build GDAL Python Bindings Android ARM64
+
+permissions:
+  contents: write
+  actions: read
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/Build GDAL Python Bindings Android ARM64.yml"
+
+env:
+  PY_TAG: cp313
+  GDAL_VERSION: "3.12.4"
+  NUMPY_VERSION: "2.3.2"
+  GDAL_TRIPLET: arm64-android-gis
+  GDAL_SOURCE_RUN_ID: "45036542523"
+
+jobs:
+  gdal-python:
+    name: Build osgeo bindings CPython 3.13 Android ARM64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Download previously built GDAL prefix (no native GDAL rebuild)
+        uses: actions/download-artifact@v4
+        with:
+          name: gdal-prefix
+          path: gdal-artifact
+          run-id: ${{ env.GDAL_SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore and validate GDAL prefix
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s gdal-artifact/gdal-prefix.tgz
+          mkdir -p "$HOME/gdal"
+          tar -xzf gdal-artifact/gdal-prefix.tgz -C "$HOME/gdal"
+          P="$HOME/gdal/$GDAL_TRIPLET"
+          test -s "$P/include/gdal.h"
+          test -s "$P/include/gdal_version.h"
+          test -s "$P/lib/libgdal.so"
+          test -s "$P/share/proj/proj.db"
+          echo "GDAL_PREFIX=$P" >> "$GITHUB_ENV"
+          chmod +x "$GITHUB_WORKSPACE/gdal-config"
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
+          export GDAL_PREFIX="$P"
+          "$GITHUB_WORKSPACE/gdal-config" --version
+          test "$("$GITHUB_WORKSPACE/gdal-config" --version)" = "$GDAL_VERSION"
+
+      - name: Download and verify Android NumPy wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p wheelhouse sdists src
+          FILE="wheelhouse/numpy-2.3.2-1-cp313-cp313-android_24_arm64_v8a.whl"
+          curl --fail --location --retry 8 --retry-all-errors --retry-delay 5 \
+            "https://github.com/Akib-du/GDAL/releases/download/android-numpy-2.3.2-cp313/numpy-2.3.2-1-cp313-cp313-android_24_arm64_v8a.whl" \
+            -o "$FILE"
+          python -m zipfile -t "$FILE"
+          sha256sum "$FILE"
+
+      - name: Download GDAL Python bindings source distribution
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, urllib.request
+          version = os.environ["GDAL_VERSION"]
+          with urllib.request.urlopen(f"https://pypi.org/pypi/GDAL/{version}/json") as response:
+              metadata = json.load(response)
+          sdist = next(item for item in metadata["urls"] if item["packagetype"] == "sdist")
+          expected = "cba3ae61b1acc83aae494f77980c2ec86cefba4d6bfd6cac84a5552efabe90bd"
+          if sdist["digests"]["sha256"] != expected:
+              raise SystemExit(f"Unexpected GDAL sdist digest: {sdist['digests']['sha256']}")
+          target = f"sdists/gdal-{version}.tar.gz"
+          urllib.request.urlretrieve(sdist["url"], target)
+          print("Downloaded verified source:", target)
+          PY
+          mkdir -p "src/gdal-$GDAL_VERSION"
+          tar -xzf "sdists/gdal-$GDAL_VERSION.tar.gz" -C "src/gdal-$GDAL_VERSION" --strip-components=1
+          test -s "src/gdal-$GDAL_VERSION/setup.py"
+          test -d "src/gdal-$GDAL_VERSION/osgeo"
+
+      - name: Install cibuildwheel
+        run: python -m pip install "cibuildwheel==3.3.1"
+
+      - name: Build GDAL Python bindings Android ARM64 wheel
+        shell: bash
+        env:
+          CIBW_PLATFORM: android
+          CIBW_BUILD: cp313-android_arm64_v8a
+          CIBW_ARCHS: arm64_v8a
+          CIBW_TEST_SKIP: "*"
+          CIBW_ENVIRONMENT: "ANDROID_API_LEVEL=24 GDAL_PREFIX=/home/runner/gdal/arm64-android-gis GDAL_CONFIG=/home/runner/work/GDAL/GDAL/gdal-config PKG_CONFIG_PATH=/home/runner/gdal/arm64-android-gis/lib/pkgconfig"
+          CIBW_BEFORE_BUILD: >-
+            pip install setuptools wheel numpy==2.3.2 &&
+            python -c "import pathlib, numpy as n; p=pathlib.Path(n.get_include())/'numpy'/'npy_math.h'; s=p.read_text(); pre='#include <complex.h>'+chr(10)+chr(10).join(['#ifndef creal','#define creal(z) __real__ (z)','#endif','#ifndef cimag','#define cimag(z) __imag__ (z)','#endif','#ifndef crealf','#define crealf(z) __real__ (z)','#endif','#ifndef cimagf','#define cimagf(z) __imag__ (z)','#endif','#ifndef creall','#define creall(z) __real__ (z)','#endif','#ifndef cimagl','#define cimagl(z) __imag__ (z)','#endif'])+chr(10)+chr(10); s=s if pre in s else pre+s; p.write_text(s); assert p.read_text().startswith(pre); print('NumPy complex accessors patched:',p)"
+        run: |
+          set -euo pipefail
+          export GDAL_PREFIX
+          chmod +x "$GITHUB_WORKSPACE/gdal-config"
+          test "$("$GITHUB_WORKSPACE/gdal-config" --version)" = "$GDAL_VERSION"
+          python -m cibuildwheel --output-dir wheelhouse "src/gdal-$GDAL_VERSION"
+
+      - name: Validate osgeo wheel and Android native binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          import re, subprocess, tempfile
+          wheels = list(Path("wheelhouse").glob("GDAL-*.whl")) + list(Path("wheelhouse").glob("gdal-*.whl"))
+          if len(wheels) != 1:
+              raise SystemExit(f"Expected one GDAL bindings wheel, found {wheels}")
+          wheel = wheels[0]
+          with ZipFile(wheel) as archive:
+              bad = archive.testzip()
+              if bad:
+                  raise SystemExit(f"Corrupt wheel member: {bad}")
+              names = archive.namelist()
+              required = ["osgeo/gdal.py", "osgeo/ogr.py", "osgeo/osr.py",
+                          "osgeo/gdal_array.py"]
+              for member in required:
+                  if member not in names:
+                      raise SystemExit(f"Missing Python binding module: {member}")
+              native = [name for name in names if name.startswith("osgeo/") and name.endswith(".so")]
+              wanted = ["_gdal.", "_ogr.", "_osr.", "_gdal_array."]
+              for stem in wanted:
+                  if not any(Path(name).name.startswith(stem) for name in native):
+                      raise SystemExit(f"Missing native osgeo extension: {stem}")
+              with tempfile.TemporaryDirectory() as directory:
+                  for index, name in enumerate(native):
+                      path = Path(directory) / f"{index}.so"
+                      path.write_bytes(archive.read(name))
+                      header = subprocess.check_output(["readelf", "-h", str(path)], text=True)
+                      if "AArch64" not in header:
+                          raise SystemExit(f"Not AArch64: {name}")
+                      program_headers = subprocess.check_output(["readelf", "-lW", str(path)], text=True)
+                      alignments = [int(line.split()[-1],16) for line in program_headers.splitlines()
+                                    if line.split() and line.split()[0] == "LOAD"]
+                      if not alignments or min(alignments) < 0x4000:
+                          raise SystemExit(f"16 KB LOAD alignment failed: {name}: {alignments}")
+                      print(f"ELF OK: {name}; LOAD alignments={alignments}")
+          print(f"Validated GDAL bindings wheel: {wheel} ({wheel.stat().st_size} bytes)")
+          PY
+          (cd wheelhouse && sha256sum *gdal*.whl *GDAL*.whl 2>/dev/null > GDAL_BINDINGS_SHA256SUM || true)
+
+      - name: Upload GDAL bindings wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdal-python-3.12.4-android-arm64-cp313
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GDAL Python bindings wheel as persistent GitHub Release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-gdal-python-3.12.4-cp313
+          name: GDAL Python Bindings 3.12.4 Android ARM64 CPython 3.13
+          draft: false
+          prerelease: true
+          make_latest: false
+          files: |
+            wheelhouse/*gdal*.whl
+            wheelhouse/*GDAL*.whl
+          fail_on_unmatched_files: true
