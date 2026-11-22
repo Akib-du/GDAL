@@ -2,12 +2,9 @@ name: Resume NumPy + Rasterio Android wheels (reuse GDAL)
 
 on:
   workflow_dispatch:
-    inputs:
-      gdal_run_id:
-        description: "Successful GDAL build run ID containing the gdal-prefix artifact"
-        required: true
-        default: "45036542523"
-        type: string
+  push:
+    paths:
+      - ".github/workflows/Resume NumPy Rasterio.yml"
 
 env:
   PY_TAG: cp313
@@ -30,7 +27,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: gdal-prefix
-          run-id: ${{ inputs.gdal_run_id }}
+          run-id: 45036542523
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Unpack and validate GDAL prefix
@@ -57,7 +54,7 @@ jobs:
           export PATH="$GITHUB_WORKSPACE:$PATH"
           test -x "$GDAL_CONFIG"
           test -f "$GDAL_PREFIX/include/gdal.h"
-          echo "Using cached GDAL $GDAL_VERSION from run ${{ inputs.gdal_run_id }}"
+          echo "Using cached GDAL $GDAL_VERSION from run 45036542523"
 
           mkdir -p sdists src
           python -m pip download --no-binary :all: --no-deps -d sdists \
