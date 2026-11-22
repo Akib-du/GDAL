@@ -91,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p wheelhouse/native wheelhouse/data
-          find "$GDAL_PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -exec cp -av {} wheelhouse/native/ \\;
+          find "$GDAL_PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -exec cp -av {} wheelhouse/native/ \;
           test -n "$(find wheelhouse/native -type f -name '*.so*' -print -quit)"
           cp -a "$GDAL_PREFIX/share/gdal" wheelhouse/data/gdal
           cp -a "$GDAL_PREFIX/share/proj" wheelhouse/data/proj
