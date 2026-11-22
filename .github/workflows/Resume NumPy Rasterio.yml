@@ -91,15 +91,15 @@ jobs:
           # <math.h>, so add the C-only declaration header explicitly.
           header = Path("src/numpy-2.2.6/numpy/_core/include/numpy/npy_math.h")
           htext = header.read_text()
-          include_anchor = "#include <math.h>\\n"
-          include_patch = "#include <math.h>\\n\\n#ifndef __cplusplus\\n#include <complex.h>\\n#endif\\n"
+          include_anchor = "#include <math.h>" + chr(10)
+          include_patch = "#include <math.h>" + chr(10) + chr(10) + "#ifndef __cplusplus" + chr(10) + "#include <complex.h>" + chr(10) + "#endif" + chr(10)
           if include_patch not in htext:
               if include_anchor not in htext:
                   raise SystemExit("Expected npy_math.h math.h include not found; refusing unsafe patch")
               htext = htext.replace(include_anchor, include_patch, 1)
               header.write_text(htext)
           verified_header = header.read_text()
-          assert "#ifndef __cplusplus\\n#include <complex.h>\\n#endif" in verified_header
+          assert ("#ifndef __cplusplus" + chr(10) + "#include <complex.h>" + chr(10) + "#endif") in verified_header
           print("Verified: C complex accessors receive Bionic declarations from <complex.h>.")
           assert "mandatory_complex_math_funcs = []" in check
           assert "c99_complex_funcs = [" in check
