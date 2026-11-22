@@ -170,5 +170,7 @@ jobs:
           draft: false
           prerelease: true
           make_latest: false
-          files: wheelhouse/rasterio-*.whl
+          files: |
+            wheelhouse/rasterio-*.whl
+            wheelhouse/numpy-*.whl
           fail_on_unmatched_files: true
