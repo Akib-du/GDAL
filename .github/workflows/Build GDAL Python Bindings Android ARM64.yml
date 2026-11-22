@@ -171,7 +171,5 @@ jobs:
           draft: false
           prerelease: true
           make_latest: false
-          files: |
-            wheelhouse/*gdal*.whl
-            wheelhouse/*GDAL*.whl
+          files: wheelhouse/gdal-3.12.4-cp313-cp313-android_24_arm64_v8a.whl
           fail_on_unmatched_files: true
