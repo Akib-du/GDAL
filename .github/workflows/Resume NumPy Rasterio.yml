@@ -86,21 +86,30 @@ jobs:
           path.write_text(source)
           check = path.read_text()
 
-          # NumPy's C inline complex accessors call creal/cimag variants.
-          # Bionic declares these in <complex.h>; npy_math.h only included
-          # <math.h>, so add the C-only declaration header explicitly.
+          # Android API-level headers may not declare C complex accessors
+          # for every supported API. Clang provides __real__/__imag__ for C
+          # complex values; use these language operators instead of libc calls.
           header = Path("src/numpy-2.2.6/numpy/_core/include/numpy/npy_math.h")
           htext = header.read_text()
-          include_anchor = "#include <math.h>" + chr(10)
-          include_patch = "#include <math.h>" + chr(10) + chr(10) + "#ifndef __cplusplus" + chr(10) + "#include <complex.h>" + chr(10) + "#endif" + chr(10)
-          if include_patch not in htext:
-              if include_anchor not in htext:
-                  raise SystemExit("Expected npy_math.h math.h include not found; refusing unsafe patch")
-              htext = htext.replace(include_anchor, include_patch, 1)
-              header.write_text(htext)
+          replacements = {
+              "return creal(z);": "return __real__ z;",
+              "return cimag(z);": "return __imag__ z;",
+              "return crealf(z);": "return __real__ z;",
+              "return cimagf(z);": "return __imag__ z;",
+              "return creall(z);": "return __real__ z;",
+              "return cimagl(z);": "return __imag__ z;",
+          }
+          for old_expr, new_expr in replacements.items():
+              count = htext.count(old_expr)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one {old_expr!r}, found {count}; refusing unsafe patch")
+              htext = htext.replace(old_expr, new_expr, 1)
+          header.write_text(htext)
           verified_header = header.read_text()
-          assert ("#ifndef __cplusplus" + chr(10) + "#include <complex.h>" + chr(10) + "#endif") in verified_header
-          print("Verified: C complex accessors receive Bionic declarations from <complex.h>.")
+          for expression in ("__real__ z", "__imag__ z"):
+              assert verified_header.count(expression) == 3
+          assert not any(name in verified_header for name in ("return creal(z);", "return cimag(z);", "return crealf(z);", "return cimagf(z);", "return creall(z);", "return cimagl(z);"))
+          print("Verified: all six C complex accessors use Clang __real__/__imag__ operators; no Android libc declarations required.")
           assert "mandatory_complex_math_funcs = []" in check
           assert "c99_complex_funcs = [" in check
 
