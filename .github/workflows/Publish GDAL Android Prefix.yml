@@ -1,0 +1,44 @@
+name: Publish GDAL Android ARM64 prefix
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Existing successful GDAL build workflow run ID
+        required: true
+        default: "45036542523"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download existing GDAL prefix artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gdal-prefix
+          path: gdal-artifact
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify prefix archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s gdal-artifact/gdal-prefix.tgz
+          sha256sum gdal-artifact/gdal-prefix.tgz
+          tar -tzf gdal-artifact/gdal-prefix.tgz | head -30
+
+      - name: Publish persistent release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-gdal-3.12.4-arm64-api24
+          name: GDAL 3.12.4 Android ARM64 API 24 prefix
+          draft: false
+          prerelease: true
+          make_latest: false
+          files: gdal-artifact/gdal-prefix.tgz
+          fail_on_unmatched_files: true
