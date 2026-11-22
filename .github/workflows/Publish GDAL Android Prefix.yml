@@ -33,7 +33,8 @@ jobs:
           set -euo pipefail
           test -s gdal-artifact/gdal-prefix.tgz
           sha256sum gdal-artifact/gdal-prefix.tgz
-          tar -tzf gdal-artifact/gdal-prefix.tgz | head -30
+          tar -tzf gdal-artifact/gdal-prefix.tgz > gdal-artifact/prefix-files.txt
+          sed -n '1,30p' gdal-artifact/prefix-files.txt
 
       - name: Publish persistent release asset
         uses: softprops/action-gh-release@v2
