@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Minimal gdal-config shim for cross-compiling rasterio against a vcpkg GDAL.
+# vcpkg's gdal port does not ship gdal-config, but rasterio's setup.py needs it.
+P="${GDAL_PREFIX:?set GDAL_PREFIX to the vcpkg installed/<triplet> dir}"
+VER=$(grep -E '#define GDAL_RELEASE_NAME' "$P/include/gdal_version.h" | sed -E 's/.*"([^"]+)".*/\1/')
+for a in "$@"; do
+  case "$a" in
+    --version)  echo "$VER" ;;
+    --prefix)   echo "$P" ;;
+    --cflags)   echo "-I$P/include" ;;
+    --libs)     echo "-L$P/lib -lgdal" ;;
+    --datadir)  echo "$P/share/gdal" ;;
+    --dep-libs) echo "" ;;
+    *) echo "unsupported: $a" >&2; exit 1 ;;
+  esac
+done
