@@ -31,8 +31,9 @@ jobs:
         run: |
           set -euo pipefail
           test -s gdal-prefix.tgz
-          tar -tzf gdal-prefix.tgz | grep -q "^$GDAL_TRIPLET/include/gdal.h$"
-          tar -tzf gdal-prefix.tgz | grep -q "^$GDAL_TRIPLET/lib/libgdal.so$"
+          tar -tzf gdal-prefix.tgz > gdal-prefix-files.txt
+          grep -Fqx "$GDAL_TRIPLET/include/gdal.h" gdal-prefix-files.txt
+          grep -Fqx "$GDAL_TRIPLET/lib/libgdal.so" gdal-prefix-files.txt
           echo "GDAL prefix restored from Run $GDAL_SOURCE_RUN_ID; no GDAL build."
       - uses: actions/upload-artifact@v4
         with:
