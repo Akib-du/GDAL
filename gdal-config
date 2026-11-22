@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -euo pipefail
 # Minimal gdal-config shim for cross-compiling rasterio against a vcpkg GDAL.
 # vcpkg's gdal port does not ship gdal-config, but rasterio's setup.py needs it.
 P="${GDAL_PREFIX:?set GDAL_PREFIX to the vcpkg installed/<triplet> dir}"
