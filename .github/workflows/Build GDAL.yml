@@ -13,153 +13,94 @@ env:
   GDAL_TRIPLET: arm64-android-gis
   RASTERIO_VERSION: "1.4.3"
   NUMPY_VERSION: "2.2.6"
+  GDAL_SOURCE_RUN_ID: "45036542523"
 
 jobs:
   gdal:
-    name: GDAL (vcpkg, aarch64 Android)
+    name: Restore verified GDAL prefix (no rebuild)
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gdal-prefix
+          run-id: ${{ env.GDAL_SOURCE_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
 
-      - name: Install host-side Autotools dependencies
+      - name: Validate and republish cached GDAL prefix
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            autoconf autoconf-archive automake libtool
-          command -v autoconf
-          command -v autoreconf
-          command -v automake
-          command -v libtoolize
-
-      - name: Set up vcpkg and Android-safe dependency overlays
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
-          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-
-          # Current vcpkg enables OpenSSL's 64-bit GCC __int128 EC assembly
-          # optimization for every ARM64 Clang target. NDK Clang's Android
-          # configuration fails that OpenSSL code path, so disable only that
-          # optimization for Android and retain OpenSSL itself.
-          mkdir -p "$RUNNER_TEMP/overlay-ports"
-          cp -a "$RUNNER_TEMP/vcpkg/ports/openssl" "$RUNNER_TEMP/overlay-ports/openssl"
-          OVERLAY_PORTS="$RUNNER_TEMP/overlay-ports" python3 - <<'PY'
-          import os
-          from pathlib import Path
-          p = Path(os.environ["OVERLAY_PORTS"]) / "openssl" / "portfile.cmake"
-          s = p.read_text()
-          target = "vcpkg_list(APPEND CONFIGURE_OPTIONS enable-ec_nistp_64_gcc_128)"
-          if target not in s:
-              raise SystemExit("Expected OpenSSL __int128 optimization option was not found; refusing to patch an unknown portfile.")
-          p.write_text(s.replace(target, "# Disabled for Android NDK: avoid unsupported OpenSSL __int128 EC optimization.", 1))
-          print("Applied Android-only OpenSSL __int128 optimization workaround.")
-          PY
-          sed -n '1,100p' "$RUNNER_TEMP/overlay-ports/openssl/portfile.cmake"
-
-          # Keep GDAL's PostgreSQL driver enabled. PostgreSQL 18 calls
-          # nl_langinfo_l(), which Bionic only exposes from API 26, while this
-          # project intentionally targets API 24. Patch only the Android
-          # locale-detection branch; Android's supported locale is UTF-8.
-          cp -a "$RUNNER_TEMP/vcpkg/ports/libpq" "$RUNNER_TEMP/overlay-ports/libpq"
-          cp "$GITHUB_WORKSPACE/.github/patches/libpq-android-api24-locale.patch" \
-            "$RUNNER_TEMP/overlay-ports/libpq/android-api24-locale.patch"
-          OVERLAY_PORTS="$RUNNER_TEMP/overlay-ports" python3 - <<'PY'
-          import os
-          from pathlib import Path
-          p = Path(os.environ["OVERLAY_PORTS"]) / "libpq" / "portfile.cmake"
-          s = p.read_text()
-          needle = "        windows/postgresql-14.0-use-mingw-setjmp-on-ucrt.patch\n"
-          if s.count(needle) != 1:
-              raise SystemExit("Unexpected libpq portfile patch list; refusing an unverified edit.")
-          s = s.replace(needle, needle + "        android-api24-locale.patch\n", 1)
-          p.write_text(s)
-          if "android-api24-locale.patch" not in p.read_text():
-              raise SystemExit("Android libpq patch was not registered.")
-          print("Registered Android API 24 locale compatibility patch for libpq.")
-          PY
-          grep -n -A12 -B3 'PATCHES' "$RUNNER_TEMP/overlay-ports/libpq/portfile.cmake"
-
-      - name: Create Android ARM64 triplet
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/triplets"
-          # Use the checked-in triplet as the single source of truth. It also
-          # defines the Autotools host triplet and Android ABI/platform options;
-          # omitting these silently falls back to an ARMv7 compiler in libiconv.
-          cp "$GITHUB_WORKSPACE/arm64-android-gis.cmake" "$RUNNER_TEMP/triplets/$GDAL_TRIPLET.cmake"
-          TRIPLET="$RUNNER_TEMP/triplets/$GDAL_TRIPLET.cmake"
-          grep -Fq 'set(VCPKG_TARGET_ARCHITECTURE arm64)' "$TRIPLET"
-          grep -Fq 'set(VCPKG_MAKE_BUILD_TRIPLET "--host=aarch64-linux-android")' "$TRIPLET"
-          grep -Fq '"-DANDROID_ABI=arm64-v8a"' "$TRIPLET"
-          grep -Fq '"-DANDROID_PLATFORM=android-24"' "$TRIPLET"
-          cat "$TRIPLET"
-
-      - name: Configure Android NDK
-        shell: bash
-        run: |
-          set -euo pipefail
-          NDK="${ANDROID_NDK_LATEST_HOME:-}"
-          if [[ -z "$NDK" || ! -d "$NDK" ]]; then
-            NDK="$(find "${ANDROID_HOME:-/opt/android-sdk}/ndk" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V | tail -n1)"
-          fi
-          test -n "$NDK" && test -d "$NDK" || { echo "Android NDK was not found on this runner." >&2; exit 1; }
-          echo "ANDROID_NDK_HOME=$NDK" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$NDK" >> "$GITHUB_ENV"
-          echo "Using Android NDK: $NDK"
-          test -x "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/clang"
-
-      - name: Build GDAL and native dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          "$RUNNER_TEMP/vcpkg/vcpkg" install gdal \
-            --triplet "$GDAL_TRIPLET" \
-            --overlay-triplets="$RUNNER_TEMP/triplets" \
-            --overlay-ports="$RUNNER_TEMP/overlay-ports" \
-            --x-install-root="$GITHUB_WORKSPACE/gdal-prefix"
-
-      - name: Verify GDAL installation
-        shell: bash
-        run: |
-          set -euo pipefail
-          PREFIX="$GITHUB_WORKSPACE/gdal-prefix/$GDAL_TRIPLET"
-          test -f "$PREFIX/include/gdal.h"
-          test -f "$PREFIX/lib/libgdal.so"
-          test -d "$PREFIX/share/gdal"
-          test -d "$PREFIX/share/proj"
-          echo "Installed GDAL headers:"
-          find "$PREFIX/include" -maxdepth 2 -type f -name "gdal_version.h" -o -name "gdal.h"
-          find "$PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -print | head -40
-          # The version header location varies between GDAL/vcpkg builds.
-          # gdal-config detects the version from gdal_version.h or gdal.h.
-          chmod +x "$GITHUB_WORKSPACE/gdal-config"
-          export GDAL_PREFIX="$PREFIX"
-          VERSION="$("$GITHUB_WORKSPACE/gdal-config" --version)"
-          test -n "$VERSION"
-          echo "Verified GDAL version: $VERSION"
-          test "$("$GITHUB_WORKSPACE/gdal-config" --prefix)" = "$PREFIX"
-          test -d "$("$GITHUB_WORKSPACE/gdal-config" --datadir)"
-          test -f "$PREFIX/include/gdal.h"
-          test -f "$PREFIX/lib/libgdal.so"
-          echo "GDAL headers, shared library, data directory, and gdal-config are valid."
-
-      - name: Package GDAL prefix
-        run: tar -C gdal-prefix -czf gdal-prefix.tgz "$GDAL_TRIPLET"
-
+          test -s gdal-prefix.tgz
+          tar -tzf gdal-prefix.tgz | grep -q "^$GDAL_TRIPLET/include/gdal.h$"
+          tar -tzf gdal-prefix.tgz | grep -q "^$GDAL_TRIPLET/lib/libgdal.so$"
+          echo "Verified cached GDAL prefix from run $GDAL_SOURCE_RUN_ID; no GDAL compilation."
+      
       - uses: actions/upload-artifact@v4
         with:
           name: gdal-prefix
           path: gdal-prefix.tgz
           if-no-files-found: error
+          retention-days: 14
+
+  sources:
+    name: Download and preserve NumPy + Rasterio sources
+    needs: gdal
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: gdal-prefix
+
+      - name: Unpack and validate GDAL configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/gdal"
+          tar -xzf gdal-prefix.tgz -C "$HOME/gdal"
+          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
+          chmod +x "$GITHUB_WORKSPACE/gdal-config"
+          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
+          export PATH="$GITHUB_WORKSPACE:$PATH"
+          test -f "$GDAL_PREFIX/include/gdal.h"
+          test -f "$GDAL_PREFIX/lib/libgdal.so"
+          test -d "$GDAL_PREFIX/share/gdal"
+          "$GDAL_CONFIG" --version
+          echo "GDAL_PREFIX=$GDAL_PREFIX" >> "$GITHUB_ENV"
+
+      - name: Download NumPy and Rasterio source distributions
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
+          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
+          export GDAL_VERSION="$("$GDAL_CONFIG" --version)"
+          export PATH="$GITHUB_WORKSPACE:$PATH"
+          mkdir -p sdists
+          python -m pip download --no-binary :all: --no-deps -d sdists \
+            "numpy==$NUMPY_VERSION" "rasterio==$RASTERIO_VERSION"
+          test -s "sdists/numpy-$NUMPY_VERSION.tar.gz"
+          test -s "sdists/rasterio-$RASTERIO_VERSION.tar.gz"
+          tar -tzf "sdists/numpy-$NUMPY_VERSION.tar.gz" >/dev/null
+          tar -tzf "sdists/rasterio-$RASTERIO_VERSION.tar.gz" >/dev/null
+          sha256sum sdists/*.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-sdists
+          path: sdists/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
 
   wheels:
-    name: NumPy + Rasterio Android wheels
-    needs: gdal
+    name: Build NumPy + Rasterio Android wheels (reuse cached inputs)
+    needs: [gdal, sources]
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -173,52 +114,41 @@ jobs:
         with:
           name: gdal-prefix
 
-      - name: Unpack and validate GDAL prefix
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-sdists
+
+      - name: Unpack and validate cached inputs
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/gdal"
+          mkdir -p "$HOME/gdal" src
           tar -xzf gdal-prefix.tgz -C "$HOME/gdal"
-          echo "GDAL_PREFIX=$HOME/gdal/$GDAL_TRIPLET" >> "$GITHUB_ENV"
-          test -f "$HOME/gdal/$GDAL_TRIPLET/include/gdal.h"
-          test -f "$HOME/gdal/$GDAL_TRIPLET/lib/libgdal.so"
+          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
           chmod +x "$GITHUB_WORKSPACE/gdal-config"
+          test -f "$GDAL_PREFIX/include/gdal.h"
+          test -f "$GDAL_PREFIX/lib/libgdal.so"
+          test -s "numpy-$NUMPY_VERSION.tar.gz"
+          test -s "rasterio-$RASTERIO_VERSION.tar.gz"
+          tar -xzf "numpy-$NUMPY_VERSION.tar.gz" -C src
+          tar -xzf "rasterio-$RASTERIO_VERSION.tar.gz" -C src
+          test -d "src/numpy-$NUMPY_VERSION"
+          test -d "src/rasterio-$RASTERIO_VERSION"
+          echo "GDAL prefix and both source distributions restored from artifacts."
 
       - name: Install cibuildwheel
         run: python -m pip install --upgrade "cibuildwheel==3.3.1"
 
-      - name: Download NumPy and Rasterio source distributions
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Rasterio's PEP 517 metadata hook calls gdal-config before the
-          # wheel build starts. Export the Android GDAL configuration here,
-          # not only in the later cibuildwheel step.
-          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
-          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
-          export GDAL_VERSION="$("$GDAL_CONFIG" --version)"
-          export PATH="$GITHUB_WORKSPACE:$PATH"
-          test -x "$GDAL_CONFIG"
-          test -f "$GDAL_PREFIX/include/gdal.h"
-          echo "Rasterio source metadata will use GDAL $GDAL_VERSION via $GDAL_CONFIG"
-
-          mkdir -p sdists src
-          python -m pip download --no-binary :all: --no-deps -d sdists \
-            "numpy==$NUMPY_VERSION" "rasterio==$RASTERIO_VERSION"
-          for f in sdists/*.tar.gz; do
-            d="src/$(basename "$f" .tar.gz)"
-            mkdir -p "$d"
-            tar -xzf "$f" -C "$d" --strip-components=1
-          done
-          test -d "src/numpy-$NUMPY_VERSION"
-          test -d "src/rasterio-$RASTERIO_VERSION"
-
       - name: Build NumPy Android wheel
+        shell: bash
         env:
           CIBW_PLATFORM: android
           CIBW_BUILD: cp313-android_arm64_v8a
           CIBW_ARCHS: arm64_v8a
-        run: python -m cibuildwheel --output-dir wheelhouse "src/numpy-$NUMPY_VERSION"
+          CIBW_BEFORE_BUILD: "pip install 'Cython>=3.0.6' 'meson-python>=0.15.0'"
+        run: |
+          set -euo pipefail
+          python -m cibuildwheel --output-dir wheelhouse "src/numpy-$NUMPY_VERSION"
 
       - name: Build Rasterio Android wheel
         shell: bash
@@ -228,6 +158,7 @@ jobs:
           CIBW_ARCHS: arm64_v8a
         run: |
           set -euo pipefail
+          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
           export CIBW_ENVIRONMENT="GDAL_PREFIX=$GDAL_PREFIX GDAL_CONFIG=$GITHUB_WORKSPACE/gdal-config PKG_CONFIG_PATH=$GDAL_PREFIX/lib/pkgconfig"
           export CIBW_BEFORE_BUILD="pip install cython numpy==$NUMPY_VERSION setuptools wheel"
           python -m cibuildwheel --output-dir wheelhouse "src/rasterio-$RASTERIO_VERSION"
@@ -236,6 +167,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
           mkdir -p wheelhouse/native wheelhouse/data
           find "$GDAL_PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -exec cp -av {} wheelhouse/native/ \;
           test -n "$(find wheelhouse/native -type f -name '*.so*' -print -quit)"
@@ -247,3 +179,4 @@ jobs:
           name: android-arm64-gis-wheels
           path: wheelhouse
           if-no-files-found: error
+          retention-days: 14
