@@ -1,5 +1,8 @@
 name: Prepare NumPy Android ARM64 wheel
 
+permissions:
+  contents: write
+
 on:
   workflow_dispatch:
   push:
@@ -81,6 +84,17 @@ jobs:
           path: wheelhouse/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish NumPy wheel as a persistent GitHub Release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-numpy-2.3.2-cp313
+          name: NumPy 2.3.2 Android ARM64 CPython 3.13
+          draft: false
+          prerelease: true
+          make_latest: false
+          files: wheelhouse/numpy-2.3.2-1-cp313-cp313-android_24_arm64_v8a.whl
+          fail_on_unmatched_files: true
 
   verify-artifact:
     name: Download and verify saved NumPy artifact
