@@ -1,6 +1,9 @@
 name: Publish GDAL Android ARM64 prefix
 
 on:
+  push:
+    paths:
+      - ".github/workflows/Publish GDAL Android Prefix.yml"
   workflow_dispatch:
     inputs:
       source_run_id:
