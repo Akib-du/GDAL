@@ -87,7 +87,26 @@ jobs:
           check = path.read_text()
           assert "mandatory_complex_math_funcs = []" in check
           assert "c99_complex_funcs = [" in check
-          print("Verified: mandatory Android complex-libm gate bypassed; optional probes retained.")
+
+          # Android arm64 follows the AArch64 ABI: 16-byte IEEE binary128
+          # long double, little-endian. Verify the ABI properties with
+          # compile-only checks; never try to execute a target binary.
+          anchor = "longdouble_format = meson.get_external_property('longdouble_format', 'UNKNOWN')\\n"
+          if anchor not in check:
+              raise SystemExit("Expected NumPy long-double detection anchor not found; refusing unsafe patch")
+          abi_patch = """longdouble_format = meson.get_external_property('longdouble_format', 'UNKNOWN')
+          if longdouble_format == 'UNKNOWN' and host_machine.system() == 'android' and host_machine.cpu_family() == 'aarch64'
+            if host_machine.endian() == 'little' and cc.sizeof('long double') == 16 and cc.compiles('#include <float.h>\\n_Static_assert(LDBL_MANT_DIG == 113, "not IEEE binary128");\\nint main(void) { return 0; }')
+              longdouble_format = 'IEEE_QUAD_LE'
+            endif
+          endif
+          """
+          check = check.replace(anchor, abi_patch, 1)
+          path.write_text(check)
+          verified = path.read_text()
+          assert "longdouble_format = 'IEEE_QUAD_LE'" in verified
+          assert "LDBL_MANT_DIG == 113" in verified
+          print("Verified: Android arm64 long-double format uses compile-time ABI checks; no target execution.")
           PY
 
       - name: Install cibuildwheel
