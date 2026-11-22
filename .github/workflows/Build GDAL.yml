@@ -72,10 +72,10 @@ jobs:
           from pathlib import Path
           p = Path(os.environ["OVERLAY_PORTS"]) / "libpq" / "portfile.cmake"
           s = p.read_text()
-          needle = "        windows/postgresql-14.0-use-mingw-setjmp-on-ucrt.patch\\n"
+          needle = "        windows/postgresql-14.0-use-mingw-setjmp-on-ucrt.patch\n"
           if s.count(needle) != 1:
               raise SystemExit("Unexpected libpq portfile patch list; refusing an unverified edit.")
-          s = s.replace(needle, needle + "        android-api24-locale.patch\\n", 1)
+          s = s.replace(needle, needle + "        android-api24-locale.patch\n", 1)
           p.write_text(s)
           if "android-api24-locale.patch" not in p.read_text():
               raise SystemExit("Android libpq patch was not registered.")
