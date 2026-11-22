@@ -142,7 +142,11 @@ jobs:
                       if "AArch64" not in hdr:
                           raise SystemExit(f"Not AArch64: {name}")
                       ph = subprocess.check_output(["readelf", "-lW", str(p)], text=True)
-                      aligns = [int(x, 16) for x in re.findall(r"LOAD\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+(0x[0-9a-fA-F]+)", ph)]
+                      aligns = []
+                      for line in ph.splitlines():
+                          fields = line.split()
+                          if fields and fields[0] == "LOAD":
+                              aligns.append(int(fields[-1], 16))
                       if not aligns or min(aligns) < 0x4000:
                           raise SystemExit(f"16 KB LOAD alignment check failed: {name}: {aligns}")
                       print(f"ELF OK: {name}; LOAD alignments={aligns}")
