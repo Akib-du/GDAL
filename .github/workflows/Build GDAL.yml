@@ -133,12 +133,18 @@ jobs:
           test -d "$PREFIX/share/gdal"
           test -d "$PREFIX/share/proj"
           find "$PREFIX/lib" -maxdepth 1 -type f -name '*.so*' -print | head -40
-          # The checked-in helper may not retain its executable bit in the checkout.
+          # The version header location varies between GDAL/vcpkg builds.
+          # gdal-config detects the version from gdal_version.h or gdal.h.
           chmod +x "$GITHUB_WORKSPACE/gdal-config"
-          # gdal-config resolves the cross-compiled vcpkg installation via this prefix.
           export GDAL_PREFIX="$PREFIX"
-          test -f "$GDAL_PREFIX/include/gdal_version.h"
-          "$GITHUB_WORKSPACE/gdal-config" --version
+          VERSION="$("$GITHUB_WORKSPACE/gdal-config" --version)"
+          test -n "$VERSION"
+          echo "Verified GDAL version: $VERSION"
+          test "$("$GITHUB_WORKSPACE/gdal-config" --prefix)" = "$PREFIX"
+          test -d "$("$GITHUB_WORKSPACE/gdal-config" --datadir)"
+          test -f "$PREFIX/include/gdal.h"
+          test -f "$PREFIX/lib/libgdal.so"
+          echo "GDAL headers, shared library, data directory, and gdal-config are valid."
 
       - name: Package GDAL prefix
         run: tar -C gdal-prefix -czf gdal-prefix.tgz "$GDAL_TRIPLET"
