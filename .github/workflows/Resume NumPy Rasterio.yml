@@ -137,6 +137,26 @@ jobs:
       - name: Install cibuildwheel
         run: python -m pip install --upgrade "cibuildwheel==3.3.1"
 
+      # cibuildwheel downloads this pinned Android CPython runtime from
+      # Maven Central. Pre-populate its documented cache path with retries so
+      # transient Maven HTTP 429 responses do not abort the build.
+      - name: Cache Android CPython 3.13 runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          CACHE_DIR="$HOME/.cache/cibuildwheel"
+          RUNTIME="$CACHE_DIR/python-3.13.11-aarch64-linux-android.tar.gz"
+          URL="https://repo.maven.apache.org/maven2/com/chaquo/python/python/3.13.11/python-3.13.11-aarch64-linux-android.tar.gz"
+          mkdir -p "$CACHE_DIR"
+          if [ ! -s "$RUNTIME" ] || ! tar -tzf "$RUNTIME" >/dev/null 2>&1; then
+            rm -f "$RUNTIME"
+            curl --fail --location --retry 8 --retry-all-errors --retry-delay 5 \
+              --connect-timeout 30 --max-time 900 "$URL" -o "$RUNTIME"
+          fi
+          tar -tzf "$RUNTIME" >/dev/null
+          echo "Verified cached Android CPython runtime: $RUNTIME"
+          ls -lh "$RUNTIME"
+
       - name: Build NumPy Android wheel
         shell: bash
         env:
