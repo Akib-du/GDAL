@@ -55,6 +55,41 @@ jobs:
           test -d "src/rasterio-$RASTERIO_VERSION"
           echo "Restored GDAL prefix and both source archives; no source downloads."
 
+      - name: Patch NumPy Android complex-math feature detection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/numpy-2.2.6/numpy/_core/meson.build")
+          source = path.read_text()
+          old = """mandatory_complex_math_funcs = [
+            'csin', 'csinh', 'ccos', 'ccosh', 'ctan', 'ctanh', 'creal', 'cimag', 'conj'
+          ]
+          foreach func: mandatory_complex_math_funcs
+            if not cc.has_function(func, prefix: '#include <complex.h>', dependencies: m_dep)
+              error(f'Function `@func@` not found')
+            endif
+          endforeach
+          """
+          if old not in source:
+              raise SystemExit("Expected NumPy 2.2.6 mandatory complex-math check not found; refusing unsafe patch")
+          source = source.replace(
+              old,
+              "# Android/Bionic may omit optional C99 complex libm symbols.\n"
+              "# Keep NumPy's per-function HAVE_* probes below so its bundled\n"
+              "# npymath compatibility implementations are selected.\n"
+              "mandatory_complex_math_funcs = []\n",
+              1,
+          )
+          path.write_text(source)
+          check = path.read_text()
+          assert "mandatory_complex_math_funcs = []" in check
+          assert "c99_complex_funcs = [" in check
+          print("Verified: mandatory Android complex-libm gate bypassed; optional probes retained.")
+          PY
+
       - name: Install cibuildwheel
         run: python -m pip install --upgrade "cibuildwheel==3.3.1"
 
