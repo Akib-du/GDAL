@@ -138,6 +138,9 @@ jobs:
           CIBW_PLATFORM: android
           CIBW_BUILD: cp313-android_arm64_v8a
           CIBW_ARCHS: arm64_v8a
+          # Android ARM64 build has no packaged BLAS yet. Use NumPy's supported
+          # internal fallback and LP64 ABI; avoid probing unavailable ILP64 BLAS.
+          CIBW_CONFIG_SETTINGS: "setup-args=-Duse-ilp64=false setup-args=-Dallow-noblas=true build-dir=build"
           CIBW_BEFORE_BUILD: "pip install 'Cython>=3.0.6' 'meson-python>=0.15.0'"
           CIBW_TEST_COMMAND: " "
         run: |
