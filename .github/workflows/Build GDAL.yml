@@ -191,6 +191,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Rasterio's PEP 517 metadata hook calls gdal-config before the
+          # wheel build starts. Export the Android GDAL configuration here,
+          # not only in the later cibuildwheel step.
+          export GDAL_PREFIX="$HOME/gdal/$GDAL_TRIPLET"
+          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
+          export GDAL_VERSION="$("$GDAL_CONFIG" --version)"
+          export PATH="$GITHUB_WORKSPACE:$PATH"
+          test -x "$GDAL_CONFIG"
+          test -f "$GDAL_PREFIX/include/gdal.h"
+          echo "Rasterio source metadata will use GDAL $GDAL_VERSION via $GDAL_CONFIG"
+
           mkdir -p sdists src
           python -m pip download --no-binary :all: --no-deps -d sdists \
             "numpy==$NUMPY_VERSION" "rasterio==$RASTERIO_VERSION"
