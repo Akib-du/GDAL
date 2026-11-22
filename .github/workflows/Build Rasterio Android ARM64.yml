@@ -53,6 +53,8 @@ jobs:
           "$GITHUB_WORKSPACE/gdal-config" --cflags
           "$GITHUB_WORKSPACE/gdal-config" --libs
           echo "GDAL_PREFIX=$GDAL_PREFIX" >> "$GITHUB_ENV"
+          echo "GDAL_CONFIG=$GITHUB_WORKSPACE/gdal-config" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE" >> "$GITHUB_PATH"
 
       - name: Download and verify saved Android NumPy wheel
         shell: bash
@@ -67,14 +69,16 @@ jobs:
 
       - name: Download Rasterio source distribution
         shell: bash
+        env:
+          GDAL_CONFIG: ${{ github.workspace }}/gdal-config
         run: |
           set -euo pipefail
-          export GDAL_CONFIG="$GITHUB_WORKSPACE/gdal-config"
           export PATH="$GITHUB_WORKSPACE:$PATH"
           chmod +x "$GDAL_CONFIG"
           "$GDAL_CONFIG" --version
           mkdir -p sdists src
-          python -m pip download --no-binary=:all: --no-deps --dest sdists "rasterio==$RASTERIO_VERSION"
+          # Avoid an isolated PEP 517 metadata environment hiding the GDAL config.
+          python -m pip download --no-build-isolation --no-binary=:all: --no-deps --dest sdists "rasterio==$RASTERIO_VERSION"
           TARBALL="$(find sdists -maxdepth 1 -name 'rasterio-*.tar.gz' -print -quit)"
           test -n "$TARBALL"
           mkdir -p src/rasterio-$RASTERIO_VERSION
