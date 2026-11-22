@@ -35,9 +35,10 @@ jobs:
           # optimization for Android and retain OpenSSL itself.
           mkdir -p "$RUNNER_TEMP/overlay-ports"
           cp -a "$RUNNER_TEMP/vcpkg/ports/openssl" "$RUNNER_TEMP/overlay-ports/openssl"
-          python3 - <<'PY'
+          OVERLAY_PORTS="$RUNNER_TEMP/overlay-ports" python3 - <<'PY'
+          import os
           from pathlib import Path
-          p = Path("'"$RUNNER_TEMP"'/overlay-ports/openssl/portfile.cmake")
+          p = Path(os.environ["OVERLAY_PORTS"]) / "openssl" / "portfile.cmake"
           s = p.read_text()
           old = 'if(VCPKG_DETECTED_CMAKE_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$"'
           new = 'if(NOT VCPKG_TARGET_IS_ANDROID AND VCPKG_DETECTED_CMAKE_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$"'
