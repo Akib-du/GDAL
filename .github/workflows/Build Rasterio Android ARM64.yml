@@ -104,8 +104,10 @@ jobs:
           CIBW_PLATFORM: android
           CIBW_BUILD: cp313-android_arm64_v8a
           CIBW_ARCHS: arm64_v8a
-          CIBW_ENVIRONMENT: 'GDAL_PREFIX=/home/runner/gdal/arm64-android-gis GDAL_CONFIG=/home/runner/work/GDAL/GDAL/gdal-config PKG_CONFIG_PATH=/home/runner/gdal/arm64-android-gis/lib/pkgconfig CFLAGS="-include complex.h"'
-          CIBW_BEFORE_BUILD: "pip install numpy==2.3.2"
+          CIBW_ENVIRONMENT: "GDAL_PREFIX=/home/runner/gdal/arm64-android-gis GDAL_CONFIG=/home/runner/work/GDAL/GDAL/gdal-config PKG_CONFIG_PATH=/home/runner/gdal/arm64-android-gis/lib/pkgconfig"
+          CIBW_BEFORE_BUILD: >-
+            pip install cython numpy==2.3.2 setuptools wheel &&
+            python -c "import pathlib, numpy as n; p = pathlib.Path(n.get_include()) / 'numpy' / 'npy_math.h'; s = p.read_text(); p.write_text(s if '#include <complex.h>' in s else '#include <complex.h>\\n' + s)"
         run: |
           set -euo pipefail
           export GDAL_PREFIX
