@@ -46,7 +46,7 @@ jobs:
           p.write_text(s.replace(target, "# Disabled for Android NDK: avoid unsupported OpenSSL __int128 EC optimization.", 1))
           print("Applied Android-only OpenSSL __int128 optimization workaround.")
           PY
-          grep -n -A2 'VCPKG_TARGET_IS_ANDROID' "$RUNNER_TEMP/overlay-ports/openssl/portfile.cmake"
+          sed -n '1,100p' "$RUNNER_TEMP/overlay-ports/openssl/portfile.cmake"
 
       - name: Create Android ARM64 triplet
         shell: bash
